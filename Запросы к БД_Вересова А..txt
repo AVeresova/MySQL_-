@@ -1,0 +1,166 @@
+
+3. Скрипты характерных выборок
+
+-- Выборка среди покупателей юридических лиц --
+SELECT 
+* 
+FROM сustomer
+WHERE type = "юридическое лицо" 
+
+
+--Выборка артикулов запчастей, где в наименовании есть слово гайка --
+SELECT 
+*
+FROM auto_parts
+WHERE name LIKE "гайка%"
+
+
+--Выборка автомобилей марки NISSAN с объемом двигателя 2.0 литра
+SELECT 
+*
+FROM auto
+WHERE brand LIKE "NISSAN" AND model LIKE '%2.0%'
+
+
+--Выборка автомобилей, оприходованных на склад в сентябре 2020 года--
+SELECT 
+* 
+FROM register_auto
+WHERE date BETWEEN "2020-09-01" AND "2020-09-30"
+
+
+--Отсортировать менеджеров по должностям, а затем отсорировать по дате приема на работу от более поздней к более ранней
+SELECT 
+* 
+FROM managers
+ORDER BY position, date_of_employment DESC
+
+
+--Объединить данные столбцов артикул и наименование в таблице запчасти, вывести данные только по поставщику с id = 1
+SELECT 
+*,
+CONCAT(number, ' - ', name)
+FROM auto_parts
+WHERE Suppliers_id = 1
+
+
+--Вывести данные, сколько месяцев менеджеры работают в компании, отсортировать от большего к меньшему
+SELECT 
+*,
+TIMESTAMPDIFF(MONTH, date_of_employment, NOW()) 
+FROM managers
+ORDER BY TIMESTAMPDIFF(MONTH, date_of_employment, NOW()) DESC
+
+
+--В таблице автомобилей вывести информацию по брендам, которые представлены в ней. Осуществить перевод на русский язык
+SELECT DISTINCT
+brand, 
+IF(brand = "NISSAN", "Ниссан", "Киа") AS Бренд
+FROM auto
+
+
+--В таблице прихода авто на склад сгруппировать данные по автосалоном, вывести минимальную, максимальную, среднюю цену, 
+  а также общую стоимость оприходованных авто. Вывести итоги по всем столбцам.
+SELECT 
+    Car_dealerships_id,
+    MIN(price) AS "Минимальная цена",
+    MAX(price) AS "Максимальная цена",
+    ROUND(AVG(price)) "Средняя цена",
+    SUM(price) "Общая стоимость"
+FROM register_auto
+GROUP BY Car_dealerships_id
+WITH ROLLUP
+
+
+--В таблице продаж авто подсчитать, сколько автомобилей в каком месяце было продано/
+  Вывести только те месяца, в которых продажи были больше 30 штук.
+SELECT 
+	monthname(date),
+	COUNT(id)
+FROM sale_auto
+GROUP BY month(date)
+HAVING 
+	COUNT(id)>30
+
+
+-- Обычный подзапрос. Вывести в таблицу продаж автомобилей данные по VIN и себестоимости
+SELECT 
+*,
+(SELECT VIN FROM register_auto where register_auto_id = Register_Auto.id) AS VIN,
+(SELECT price FROM register_auto where register_auto_id = Register_Auto.id) AS Cost_price
+FROM sale_auto
+
+
+-- UNION. Необходимо в одной таблице вывести все товары, которые закупаются у поставщика с id=1.
+          Определить тип закупки: автомобиль, запчасть.
+
+SELECT 
+	Suppliers_id,
+	model_group,
+	'auto' AS 'type'
+FROM auto
+WHERE Suppliers_id = 1
+UNION
+SELECT 
+	Suppliers_id,
+	name,
+	'auto_parts' AS 'type'
+FROM auto_parts
+WHERE Suppliers_id = 1
+
+
+--JOIN. Вывести в одной таблице данные по продаже авто. Дополнить ее данными VIN, датой прихода на склад.
+        Посчитать количество дней на складе.
+
+SELECT 
+	sale_auto.id,
+	sale_auto.price,
+	sale_auto.date AS 'Sale_date',
+	register_auto.VIN,
+	register_auto.date AS 'Register_date',
+	TIMESTAMPDIFF(DAY, register_auto.date, sale_auto.date) AS 'days_in_stock'
+FROM sale_auto
+JOIN register_auto ON register_auto.id = register_auto_id
+
+
+-- Представление 1. Данное представление выводит актуальный склад автомобилей (те, которые были оприходованы, но еще не проданы).
+
+USE `auto`;
+CREATE  OR REPLACE VIEW `warehouse_cars` AS
+SELECT 
+	register_auto.VIN,
+	register_auto.date AS 'Register_date',
+	sale_auto.date AS 'Sale_date'
+FROM register_auto
+LEFT JOIN sale_auto ON register_auto_id =register_auto.id
+WHERE sale_auto.date IS NULL;
+
+
+-- Представление 2. Данное представление выводит выручку от продаж автомобилей в разрезе месяцев и дилерских центров.
+SELECT 
+    monthname(sale_auto.date),
+    register_auto.Car_dealerships_id,
+    COUNT(sale_auto.id),
+    SUM(sale_auto.price)
+FROM sale_auto
+JOIN register_auto ON register_auto.id = register_auto_id
+GROUP BY Car_dealerships_id
+ORDER BY monthname(sale_auto.date), register_auto.Car_dealerships_id
+
+
+-- Триггер. Поля количество и цена обязательные для заполнения.
+
+DROP TRIGGER IF EXISTS `auto`.`register_auto_BEFORE_INSERT`;
+
+DELIMITER $$
+USE `auto`$$
+CREATE DEFINER = CURRENT_USER TRIGGER `auto`.`register_auto_BEFORE_INSERT` BEFORE INSERT ON `register_auto` FOR EACH ROW
+BEGIN
+IF (NEW.quantity IS NULL AND NEW.price IS NULL) THEN
+		SIGNAL SQLSTATE '45000'
+		SET MESSAGE_TEXT = 'Недопустимая ситуация! Заполните количество и цену';
+    END IF;
+END$$
+DELIMITER ;
+
+
